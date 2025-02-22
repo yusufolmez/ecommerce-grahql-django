@@ -1,0 +1,14 @@
+<!-- payment_template.html -->
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Payment Page</title>
+  </head>
+  <body>
+    {% if error_message %}
+    <div class="error">{{ error_message }}</div>
+    {% else %}
+    <div id="iyzipay-checkout-form" class="popup"></div>
+    {{ payment_form_content|safe }} {% endif %}
+  </body>
+</html>
