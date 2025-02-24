@@ -3,3 +3,6 @@
 
 core/product_images/
 core/store_logtos/
+core/ecommerce/migations
+core/payment/migations
+core/userManage/migations

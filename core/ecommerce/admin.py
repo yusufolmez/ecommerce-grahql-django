@@ -1,6 +1,6 @@
 from django.contrib import admin
 from .models import Products,ProductVariants,VariantOptions,VariantValues,Categorys,Variants
-from .models import Address,Order,OrderItem,Cart,CartItem,Review
+from .models import Address,Order,OrderItem,Cart,CartItem,Review,Store
 
 admin.site.register(Products)
 admin.site.register(ProductVariants)
@@ -14,3 +14,4 @@ admin.site.register(OrderItem)
 admin.site.register(Cart)
 admin.site.register(CartItem)
 admin.site.register(Review)
+admin.site.register(Store)

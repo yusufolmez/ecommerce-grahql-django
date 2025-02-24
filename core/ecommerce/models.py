@@ -25,7 +25,17 @@ class Categorys(models.Model):
     def __str__(self):
         return self.category_name
 
-    
+class Store(models.Model):
+    store_name = models.CharField(max_length=155)
+    owner = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='store_owner')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    total_profit = models.DecimalField(max_digits=12,decimal_places=2, default=0.00)
+    monthly_profit = models.DecimalField(max_digits=12,decimal_places=2, default=0.00)
+    total_sales = models.IntegerField(default=0)
+
+    def __str__(self):
+        return self.store_name    
 
 class Products(models.Model):
     product_name = models.CharField(max_length=155)
@@ -35,7 +45,7 @@ class Products(models.Model):
     product_description = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    created_by = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='product_owner')
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='products')
     def __str__(self):
         return self.product_name
 
@@ -113,7 +123,7 @@ class Order(models.Model):
     billing_address = models.ForeignKey(
         Address, on_delete=models.SET_NULL, null=True, related_name="billing_orders"
     )
-    
+
     def __str__(self):
         return f"Order {self.id} - {self.user.username} - {self.get_status_display()}"
     

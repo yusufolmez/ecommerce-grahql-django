@@ -2,7 +2,7 @@ import graphene
 from graphene_django import DjangoObjectType
 from .models import (
     Categorys, Products, VariantOptions, VariantValues, Variants, ProductVariants,
-    Address, Order, OrderItem, Cart, CartItem, Review
+    Address, Order, OrderItem, Cart, CartItem, Review, Store
 )
 from django.db import transaction
 from graphene import relay
@@ -10,6 +10,7 @@ from graphql_relay.node.node import from_global_id
 from graphene_django.filter import DjangoFilterConnectionField
 from graphene.types.generic import GenericScalar
 from decimal import Decimal
+from django.db.models import F, Sum
 
 class categoryType(DjangoObjectType):
     category_path = graphene.String()
@@ -43,6 +44,11 @@ class CategoryNode(DjangoObjectType):
             'slug': ['exact', 'icontains'],
         }
 
+class StoreNode(DjangoObjectType):
+    class Meta:
+        model = Store
+        interfaces = (relay.Node,)
+
 class ProductNode(DjangoObjectType):
     class Meta:
         model = Products
@@ -55,7 +61,6 @@ class ProductNode(DjangoObjectType):
             'created_at': ['exact', 'lt', 'gt'],
             'updated_at': ['exact', 'lt', 'gt'],
             'product_category__category_name': ['exact', 'icontains'],
-            'created_by__username': ['exact', 'icontains'],
         }
 
 class variant_optionsType(DjangoObjectType):
@@ -218,14 +223,16 @@ class CreateProductMutation(graphene.Mutation):
         product_category = graphene.ID()
         short_description = graphene.String()
         product_description = graphene.String()
+        store = graphene.ID()
     
-    def mutate(self,info,product_name,sku,product_category,short_description,product_description):
+    def mutate(self,info,product_name,sku,product_category,short_description,product_description,store):
         try:
             user= info.context.user
             if user.is_anonymous:
                 raise Exception('Lütfen giriş yapınız.')
             
             product_category = Categorys.objects.get(id=product_category)
+            store = Store.objects.get(id=store)
 
             product = Products(
                 product_name=product_name,
@@ -233,7 +240,7 @@ class CreateProductMutation(graphene.Mutation):
                 product_category=product_category,
                 short_description=short_description,
                 product_description=product_description,
-                created_by = user
+                store = store,
             )
             product.save()
             return CreateProductMutation(product=product)
@@ -804,6 +811,88 @@ class CreateReviewMutation(graphene.Mutation):
         except Exception as e:
             raise Exception(str(e))
 
+class CalculateTotalProfit(graphene.Mutation):
+    class Arguments:
+        pass
+    total_profit = graphene.Decimal()
+    def mutate(self,info):
+        try:
+            user = info.context.user
+            if  user.is_anonymous:
+                raise Exception('Lütfen giriş yapınız.')
+            
+            store = Store.objects.get(owner=user)
+            total_profit = 0
+            order_items = OrderItem.objects.filter(
+                product_variant__product__store=store
+            )
+            for item in order_items:
+                total_profit += item.unit_price*item.quantity
+            return CalculateTotalProfit(total_profit=total_profit)
+        except Exception as e:
+            raise Exception(str(e))
+
+class CalculateMonthlyProfit(graphene.Mutation):
+    class Arguments:
+        month = graphene.Int(required=True)
+        year = graphene.Int(required=True)
+    
+    monthly_profit = graphene.Decimal()
+    def mutate(self,info,month,year):
+        try:
+            user = info.context.user
+            if user.is_anonymous:
+                raise Exception('Lütfen giriş yapınız.')
+            store = Store.objects.get(owner=user)
+
+            order_items = OrderItem.objects.filter(
+                order__created_at__year=year,
+                order__created_at__month=month,
+                product_variant__product__store_id=store
+            ).annotate(
+                total_item_profit=F('unit_price') * F('quantity')
+            )
+
+            total_profit = order_items.aggregate(
+                total_profit=Sum('total_item_profit')
+            )['total_profit']
+
+            total_profit = total_profit if total_profit is not None else 0
+                
+            return CalculateMonthlyProfit(monthly_profit=total_profit)
+        except Exception as e:
+            raise Exception(str(e))
+        
+class CalculateMonthlySalesCount(graphene.Mutation):
+    class Arguments:
+        month = graphene.Int(required=True)
+        year = graphene.Int(required=True)
+    total_salesx = graphene.Int()
+    def mutate(Self,info,month,year):
+        try:
+            user = info.context.user
+            if user.is_anonymous:
+                raise Exception('Lütfen giriş yağınız.')
+            store = Store.objects.get(owner=user)
+
+            order_items = OrderItem.objects.filter(
+                order__created_at__year=year,
+                order__created_at__month=month,
+                product_variant__product__store_id=store,
+            ).annotate(
+                total_item_sales=F('quantity')
+            )
+
+            total_sales = order_items.aggregate(
+                total_sales=Sum('total_item_sales')
+            )['total_sales']
+
+            total_sales = total_sales if total_sales is not None else 0
+
+            return CalculateMonthlySalesCount(total_salesx=total_sales)
+
+        except Exception as e:
+            raise Exception(str(e))
 
 #-----------------------------------------------------------------------------------------------
 class Query(graphene.ObjectType):
@@ -811,6 +900,8 @@ class Query(graphene.ObjectType):
     all_product_variants = DjangoFilterConnectionField(ProductVariantNode)
     products = relay.Node.Field(ProductNode)
     all_products = DjangoFilterConnectionField(ProductNode)
+    products_by_store = DjangoFilterConnectionField(ProductNode, store_id=graphene.Int())
+
     order = relay.Node.Field(OrderNode)
     category = relay.Node.Field(CategoryNode)
 
@@ -851,3 +942,7 @@ class Mutation(graphene.ObjectType):
     update_order = UpdateOrderMutation.Field()
 
     create_review = CreateReviewMutation.Field()
+
+    Calculate_totalprofit = CalculateTotalProfit.Field()
+    calculate_monthly_profit = CalculateMonthlyProfit.Field()
+    calculate_monthly_sales = CalculateMonthlySalesCount.Field()
