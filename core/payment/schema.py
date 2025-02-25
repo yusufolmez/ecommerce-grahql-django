@@ -75,9 +75,14 @@ class VerifyPaymentMutation(graphene.Mutation):
         try:
             payment_service = IyzicoPaymentService()
             result = payment_service.verify_payment(token)
-            
+
             if result['status'] == 'success':
                 payment = Payment.objects.get(provider_payment_id=result['payment_id'])
+                if payment.status == Payment.PaymentStatus.COMPLETED:
+                    return VerifyPaymentMutation(
+                        success=False,
+                        error_message = result['error_message']
+                    )
                 payment.status = Payment.PaymentStatus.COMPLETED
                 payment.provider_transaction_id = result['transaction_id']
                 payment.save()

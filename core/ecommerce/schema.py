@@ -2,8 +2,9 @@ import graphene
 from graphene_django import DjangoObjectType
 from .models import (
     Categorys, Products, VariantOptions, VariantValues, Variants, ProductVariants,
-    Address, Order, OrderItem, Cart, CartItem, Review, Store
+    Address, Order, OrderItem, Cart, CartItem, Review, Store,OrderCancelRecord
 )
+from graphene_file_upload.scalars import Upload
 from django.db import transaction
 from graphene import relay
 from graphql_relay.node.node import from_global_id
@@ -47,6 +48,10 @@ class CategoryNode(DjangoObjectType):
 class StoreNode(DjangoObjectType):
     class Meta:
         model = Store
+        filter_fields = {
+            "id": ["exact"],
+            "owner": ["exact"]
+        }
         interfaces = (relay.Node,)
 
 class ProductNode(DjangoObjectType):
@@ -96,6 +101,16 @@ class OrderItemType(DjangoObjectType):
     class Meta:
         model = OrderItem
         fields = '__all__'
+
+class OrderCancelRecordNode(DjangoObjectType):
+    class Meta:
+        model = OrderCancelRecord
+        filter_fields = {
+            "id": ["exact"],
+            "order": ["exact"]
+        }
+        interfaces = (relay.Node,)
+
 class CartType(DjangoObjectType):
     class Meta:
         model = Cart
@@ -104,6 +119,15 @@ class CartItemType(DjangoObjectType):
     class Meta:
         model = CartItem
         fields = '__all__'
+
+class CartItemNode(DjangoObjectType):
+    class Meta:
+        model = CartItem
+        filter_fields = { 
+            "id": ["exact"],
+            "cart":["exact"],
+        }
+        interfaces = (relay.Node,)
 
 class ProductVariantNode(DjangoObjectType):
     variants = graphene.Field(GenericScalar)
@@ -141,6 +165,11 @@ class ReviewType(DjangoObjectType):
     class Meta:
         model = Review
         fields = '__all__'
+
+class ReviewNode(DjangoObjectType):
+    class Meta:
+        model = Review
+        interfaces = (relay.Node,)
 #----------------------------------------------------------------------------------------------
 
 class CreateProductVariantMutation(graphene.Mutation):
@@ -150,8 +179,9 @@ class CreateProductVariantMutation(graphene.Mutation):
         variants= graphene.List(graphene.ID, required=True)
         product = graphene.ID(required=True)
         other_variants = graphene.JSONString(required=False)
+        image = Upload()
 
-    def mutate(Self,info,price,variants,product,other_variants=None):
+    def mutate(Self,info,price,variants,product,image,other_variants=None):
         variants = Variants.objects.filter(id__in=variants)
         price = Decimal(price)
         product = Products.objects.get(id=product)
@@ -163,7 +193,7 @@ class CreateProductVariantMutation(graphene.Mutation):
             
             if variants == existing_ids:
                 raise Exception('Bu varyasyon kombinasyonu zaten mevcut ', existing_ids )
-        product_variant = ProductVariants(price=price, product=product, other_variants=other_variants)
+        product_variant = ProductVariants(price=price, product=product, other_variants=other_variants, image=image )
         product_variant.save()
 
         product_variant.variants.set(variants)
@@ -810,6 +840,35 @@ class CreateReviewMutation(graphene.Mutation):
             return CreateReviewMutation(review=review)
         except Exception as e:
             raise Exception(str(e))
+        
+class OrderCancel(graphene.Mutation):
+    class Arguments:
+        order_id = graphene.ID(required=True)
+        reason = graphene.String(required=True)
+        
+    success = graphene.Boolean()
+    message = graphene.String()
+    
+    def mutate(self, info, order_id, reason):
+        user = info.context.user
+        try:
+            order = Order.objects.get(id=order_id, user=user)
+            if order.status == Order.OrderStatus.DELIVERED:
+                return OrderCancel(success=False, message="Teslim edilen sipariş iptal edilemez")
+                
+            # Stok güncelleme
+            for item in order.items.all():
+                item.product_variant.stock += item.quantity
+                item.product_variant.save()
+                
+            order.status = Order.OrderStatus.CANCELED
+            order.save()
+            
+            OrderCancelRecord.objects.create(order=order, reason=reason)
+            
+            return OrderCancel(success=True, message="Sipariş başarıyla iptal edildi")
+        except Exception as e:
+            return OrderCancel(success=False, message=str(e))
 
 class CalculateTotalProfit(graphene.Mutation):
     class Arguments:
@@ -903,46 +962,42 @@ class Query(graphene.ObjectType):
     products_by_store = DjangoFilterConnectionField(ProductNode, store_id=graphene.Int())
 
     order = relay.Node.Field(OrderNode)
+    order_cancel_record = DjangoFilterConnectionField(OrderCancelRecordNode)
     category = relay.Node.Field(CategoryNode)
+    all_stores = DjangoFilterConnectionField(StoreNode)
 
+    review = relay.Node.Field(ReviewNode)
+    cart_item = relay.Node.Field(CartItemNode)
+    cart_item_by_cart = DjangoFilterConnectionField(CartItemNode)
 
 class Mutation(graphene.ObjectType):
     create_product_variant = CreateProductVariantMutation.Field()
     update_product_variant = UpdateProductVariantMutation.Field()
     delete_product_variant = DeleteProductVariantMuttion.Field()
-
     create_product = CreateProductMutation.Field()
     update_product = UpdateProductMutation.Field()
     delete_product = DeleteProductMutation.Field()
-
     create_category = CreateCategoryMutation.Field()
     update_category = UpdateCategoryMutation.Field()
     delete_category = DeleteCategoryMutation.Field()
-
     create_variant_option = CreateVariantOptionMutation.Field()
     update_variant_option = UpdateVariantOptionMutation.Field()
     delete_variant_option = DeleteVariantOptionMutation.Field()
-
     create_variant_value = CreateVariantValueMutation.Field()
     update_variant_value = UpdateVariantValueMutation.Field()
     delete_variant_value = DeleteVariantValueMutation.Field()
-
     create_variant = CreateVariantMutation.Field()
     update_variant = UpdateVariantMutation.Field()
     delete_variant = DeleteVariantMutation.Field()
-
     create_address = CreateAddressMutation.Field()
     update_address = UpdateAddressMutation.Field()
     delete_address = DeleteAddressMutation.Field()
-
     add_to_cart = AddToCartMutation.Field()
     update_cart_item = UpdateCartItemMutation.Field()
-
     create_order = CreateOrderMutation.Field()
     update_order = UpdateOrderMutation.Field()
-
+    cancel_order = OrderCancel.Field()
     create_review = CreateReviewMutation.Field()
-
     Calculate_totalprofit = CalculateTotalProfit.Field()
     calculate_monthly_profit = CalculateMonthlyProfit.Field()
     calculate_monthly_sales = CalculateMonthlySalesCount.Field()

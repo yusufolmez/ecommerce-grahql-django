@@ -79,11 +79,15 @@ class ProductVariants(models.Model):
     other_variants = models.JSONField(null=True,blank=True)
     price = models.DecimalField(max_digits=12, decimal_places=2)
     stock = models.PositiveIntegerField(default=1)
+    image = models.ImageField(upload_to='product_images', null=True,blank=True)
+
+    def get_image_url(self):
+        if self.image:
+            return self.image.url
+        return None
+
     def __str__(self):
         return f"{self.product.product_name} - {self.variants.all()}"
-
-
-
 #----------------------------------------------------------------------------------------------------------
 
 class Address(models.Model):
@@ -99,8 +103,6 @@ class Address(models.Model):
     street = models.CharField(max_length=255)
     city = models.CharField(max_length=100)
     postal_code = models.CharField(max_length=20)
-
-
 
 class Order(models.Model):
     class OrderStatus(models.TextChoices):
@@ -135,7 +137,11 @@ class OrderItem(models.Model):
 
     def __str__(self):
         return f"{self.quantity} x {self.product_variant.product.product_name} (Order {self.order.id})"
-    
+
+class OrderCancelRecord(models.Model):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="cancel_records")
+    reason = models.TextField()
+    cancel_date = models.DateTimeField(auto_now_add=True)
 #----------------------------------------------------------------------------------------------------
 
 class Cart(models.Model):
@@ -151,7 +157,7 @@ class CartItem(models.Model):
     quantity = models.PositiveIntegerField(default=1)
 
     def __str__(self):
-        return f"{self.quantity} x {self.product_variant.product.product_name} in {self.cart.user.username}'s cart"
+        return f"{self.id} : {self.quantity} x {self.product_variant.product.product_name} in {self.cart.user.username}'s cart"
     
 class Review(models.Model):
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name="reviews")

@@ -2,7 +2,7 @@
 
 
 core/product_images/
-core/store_logtos/
+core/store_logos/
 core/ecommerce/migations
 core/payment/migations
 core/userManage/migations

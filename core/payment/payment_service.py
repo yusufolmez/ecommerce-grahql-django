@@ -13,6 +13,11 @@ class IyzicoPaymentService:
         }
 
     def create_payment_form(self, payment, user, callback_url):
+        if payment.status == 'COMPLETED':
+            return {    
+            'status': 'error',
+            'error_message': 'Payment has already been completed for this order.'
+            }
         buyer = {
             'id': str(user.id),
             'name': user.first_name,
@@ -34,7 +39,7 @@ class IyzicoPaymentService:
         basket_items = []
         for order_item in payment.order.items.all():  # Order'a bağlı order item'ları alıyoruz
             basket_items.append({
-                'id': str(order_item.id),  # Order item ID'sini kullan
+                'id': str(order_item.id),
                 'name': order_item.product_variant.product.product_name,  # Ürün adı
                 'category1': order_item.product_variant.product.product_category.category_name,  # Kategori
                 'category2': order_item.product_variant.product.product_category.parent_category.category_name if order_item.product_variant.product.product_category.parent_category else '',  # Alt kategori
