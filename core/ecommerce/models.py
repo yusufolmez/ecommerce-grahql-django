@@ -1,6 +1,7 @@
 from django.db import models
 from userManage.models import CustomUser
 from django.utils.text import slugify
+from django.utils import timezone
 
 class Categorys(models.Model):
     category_name = models.CharField(max_length=150, unique=True)
@@ -142,6 +143,8 @@ class OrderCancelRecord(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="cancel_records")
     reason = models.TextField()
     cancel_date = models.DateTimeField(auto_now_add=True)
+
+
 #----------------------------------------------------------------------------------------------------
 
 class Cart(models.Model):

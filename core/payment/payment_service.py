@@ -1,8 +1,13 @@
 import iyzipay
+import logging
 from django.conf import settings
-from decimal import Decimal
+from django.core.exceptions import PermissionDenied
 import json
+from django.db import transaction
 from ecommerce.models import Order
+from .models import Payment
+
+logger = logging.getLogger(__name__)
 
 class IyzicoPaymentService:
     def __init__(self):
@@ -37,14 +42,14 @@ class IyzicoPaymentService:
             'address': payment.order.shipping_address.street
         }
         basket_items = []
-        for order_item in payment.order.items.all():  # Order'a bağlı order item'ları alıyoruz
+        for order_item in payment.order.items.all():
             basket_items.append({
                 'id': str(order_item.id),
-                'name': order_item.product_variant.product.product_name,  # Ürün adı
-                'category1': order_item.product_variant.product.product_category.category_name,  # Kategori
+                'name': f"{order_item.product_variant.product.product_name} - {order_item.product_variant.variants}",  
+                'category1': order_item.product_variant.product.product_category.category_name,  
                 'category2': order_item.product_variant.product.product_category.parent_category.category_name if order_item.product_variant.product.product_category.parent_category else '',  # Alt kategori
-                'itemType': 'PHYSICAL',  # Ürünün fiziksel olduğunu varsayalım, gerekirse dinamik hale getirebiliriz
-                'price': str(order_item.unit_price * order_item.quantity)  # Fiyat ve miktarın çarpımı
+                'itemType': 'PHYSICAL', 
+                'price': str(order_item.unit_price * order_item.quantity)  
             })
         metadata = {
             'order_id': payment.order.id,
@@ -72,6 +77,7 @@ class IyzicoPaymentService:
         response_data = checkout_form_initialize.read().decode("utf-8")
         result = json.loads(response_data)
 
+
         if result.get('status') == 'success':
 
             payment.provider_token = result.get('token')
@@ -89,15 +95,14 @@ class IyzicoPaymentService:
                 'error_message': result.get('errorMessage', 'Payment failed.')
             }
 
+
+
+
     def verify_payment(self, token):
         request = {
             'locale': 'tr',
             'token': token,
-
-            
         }
-        
-        print("Verifying payment with token:", token)
 
         checkout_form_result = iyzipay.CheckoutForm().retrieve(request, self.options)
         result = json.loads(checkout_form_result.read().decode("utf-8"))
@@ -112,6 +117,10 @@ class IyzicoPaymentService:
         try:
             order = Order.objects.get(id=order_id)
             payment = order.payment
+            print(json.dumps(result, indent=4))
+            payment.provider_transaction_id = result.get('itemTransactions', [{}])[0].get('paymentTransactionId', None)
+            print(payment.provider_transaction_id)
+            payment_id = result.get('paymentId')
         except Order.DoesNotExist:
             return {
                 'status': 'error',
@@ -120,7 +129,45 @@ class IyzicoPaymentService:
 
         return {
             'status': 'success',
-            'payment_id': result.get('paymentId'),
-            'transaction_id': result.get('paymentTransactionId', None),
+            'payment_id': payment_id,
+            'transaction_id': payment.provider_transaction_id,
             'order_id': order_id
         }
+
+    def refund_payment(self, payment, user, ip_address):
+        try:
+            if payment.order.user != user:
+                raise PermissionDenied("Bu işlem için yetkiniz yok.")
+
+            request = {
+                'locale': 'tr',
+                'conversationId': str(payment.order.id),
+                'paymentTransactionId':  payment.provider_transaction_id,
+                'price': str(payment.amount),
+                'currency': payment.currency,
+                'ip': ip_address
+            }
+
+            refund = iyzipay.Refund().create(request, self.options)
+            response_data = refund.read().decode("utf-8")
+            result = json.loads(response_data)
+
+
+            if result.get('status') == 'success':
+                with transaction.atomic():
+                    payment.status = Payment.PaymentStatus.REFUNDED
+                    payment.save()
+
+                    payment.order.status = 'CANCELED'
+                    payment.order.save()
+
+                return {
+                    'status': 'success'
+                }
+            else:
+                error_message = result.get('errorMessage') or "İade işlemi başarısız."
+                logger.error(f"İyzipay iade hatası: {error_message}")
+                return {'status': 'error', 'error_message': error_message}
+        except Exception as e:
+            logger.error(f"İade sırasında beklenmeyen hata: {str(e)}", exc_info=True)
+            return {'status': 'error', 'error_message': str(e)}
